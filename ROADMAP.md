@@ -24,7 +24,7 @@ This project will be built in stages. Each stage is a self-contained directory u
 14. `13-day2-and-upgrades` (done)
 15. `14-assisted-and-agent-based-flows` (done)
 16. `15-validation-and-troubleshooting` (done)
-17. `16-manual-install-runbook` (planned)
+17. `16-manual-install-runbook` (done)
 
 **Open questions**
 - Baseline version pinned to 4.18 (from local PDFs). Decide how to present deltas for newer versions.
