@@ -42,6 +42,8 @@ The installation program produces three asset types: `install-config.yaml`, Kube
 - `podman` or another OCI client: Pull and inspect images when needed.
 - `coreos-installer`: Useful for inspecting or embedding Ignition into RHCOS images.
 
+Note: In the hard-way path we will avoid using `openshift-install` to generate final install assets. We will use it only as a reference point and to compare outputs. The manual runbook will build equivalent artifacts by hand.
+
 ## Pull secret
 
 Connected installs require a registry pull secret for OpenShift components. This pull secret is used by the installer and later stored in the cluster for image pulls.
