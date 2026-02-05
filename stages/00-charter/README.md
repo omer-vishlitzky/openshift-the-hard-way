@@ -31,7 +31,7 @@ This stage defines the purpose, boundaries, and working standards for the projec
 - AI: Assisted Installer (service-driven, agent-based install).
 
 **Quality bar**
-- Every critical step has a verification check.
+- Every critical operational step has a verification check.
 - Version-specific behavior is explicitly pinned and documented.
 - Any non-obvious behavior is backed by a cited source or code pointer.
 
