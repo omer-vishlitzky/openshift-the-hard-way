@@ -172,3 +172,13 @@ stages/16-manual-install-runbook/scripts/30-render-manifests.sh
 ```bash
 stages/16-manual-install-runbook/scripts/40-gen-ignition.sh
 ```
+
+## 5. Cluster config resources and CVO bootstrap
+
+```bash
+stages/16-manual-install-runbook/scripts/45-gen-cluster-configs.sh
+stages/16-manual-install-runbook/scripts/35-extract-release-manifests.sh
+oc apply -f stages/16-manual-install-runbook/generated/cluster-config/
+oc apply -f stages/16-manual-install-runbook/generated/release-manifests/0000_00_cluster-version-operator_*.yaml
+oc apply -f stages/16-manual-install-runbook/generated/cluster-config/clusterversion.yaml
+```
