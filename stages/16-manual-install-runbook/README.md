@@ -34,6 +34,11 @@ vi stages/16-manual-install-runbook/config/cluster-vars.sh
 ```
 
 These values are used by all scripts and artifact generation.
+If you want a new cluster ID, regenerate it:
+
+```bash
+uuidgen > stages/16-manual-install-runbook/config/cluster-id.txt
+```
 
 ## 2. Generate PKI (manual)
 
