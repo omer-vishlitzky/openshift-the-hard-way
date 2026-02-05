@@ -2,7 +2,7 @@
 
 A hands-on, from-scratch walkthrough of how OpenShift 4.x actually comes together on bare metal. This repo aims to explain and reproduce the installer logic step by step, with minimal automation, so engineers can understand ignition, RHCOS, OSTree, bootstrapping, etcd, and the control-plane pivot at a deep level.
 
-This is an educational, “see the gears” project. It is not a supported installation method.
+This is an educational, "see the gears" project. It is not a supported installation method.
 
 **What this is**
 - A staged, repeatable path to building a cluster by hand.
@@ -20,7 +20,8 @@ This is an educational, “see the gears” project. It is not a supported insta
 - Scripts are used only when they clarify or automate repetitive, transparent steps.
 
 **Status**
-- Early scaffolding. Stage 00 is complete. The roadmap and upcoming stages are defined in `ROADMAP.md`.
+- Early scaffolding. Stages 00 and 01 are complete. The roadmap and upcoming stages are defined in `ROADMAP.md`.
+- Baseline version: OpenShift 4.18 (from local documentation set in `../pdfs/openshift`).
 
 **Source material**
 - Official OpenShift documentation PDFs in `../pdfs`.

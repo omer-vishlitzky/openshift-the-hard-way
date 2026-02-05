@@ -9,7 +9,7 @@ This project will be built in stages. Each stage is a self-contained directory u
 
 **Planned stages**
 1. `00-charter` (done)
-2. `01-sources-and-version-pin` (planned)
+2. `01-sources-and-version-pin` (done)
 3. `02-architecture-map` (planned)
 4. `03-lab-and-network-prereqs` (planned)
 5. `04-release-payload-and-tools` (planned)
@@ -25,6 +25,6 @@ This project will be built in stages. Each stage is a self-contained directory u
 15. `14-validation-and-troubleshooting` (planned)
 
 **Open questions**
-- Target OpenShift minor version to pin (example: 4.16). We will choose and document this in Stage 01.
+- Baseline version pinned to 4.18 (from local PDFs). Decide how to present deltas for newer versions.
 - Initial lab topology and hardware assumptions (SNO vs HA, IP plan, DNS/LB approach).
 - Which path(s) to validate first on the provided bare metal (manual UPI-like or Assisted/ABI internals).
