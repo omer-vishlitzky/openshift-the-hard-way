@@ -20,7 +20,7 @@ This is an educational, "see the gears" project. It is not a supported installat
 - Scripts are used only when they clarify or automate repetitive, transparent steps.
 
 **Status**
-- Early scaffolding. Stages 00 through 05 are complete. The roadmap and upcoming stages are defined in `ROADMAP.md`.
+- Early scaffolding. Stages 00 through 15 are complete. The roadmap and upcoming stages are defined in `ROADMAP.md`.
 - Baseline version: OpenShift 4.18 (from local documentation set in `../pdfs/openshift`).
 
 **Source material**

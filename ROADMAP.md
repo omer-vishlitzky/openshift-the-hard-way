@@ -14,17 +14,19 @@ This project will be built in stages. Each stage is a self-contained directory u
 4. `03-architecture-map` (done)
 5. `04-lab-and-network-prereqs` (done)
 6. `05-release-payload-and-tools` (done)
-7. `06-rhcos-and-ostree` (planned)
-8. `07-ignition-and-butane` (planned)
-9. `08-bootstrap-and-bootkube` (planned)
-10. `09-etcd-and-control-plane` (planned)
-11. `10-pivot-and-mco-handoff` (planned)
-12. `11-worker-join-and-csr-flow` (planned)
-13. `12-cluster-operators-and-cvo` (planned)
-14. `13-day2-and-upgrades` (planned)
-15. `14-assisted-and-agent-based-flows` (planned)
-16. `15-validation-and-troubleshooting` (planned)
+7. `06-rhcos-and-ostree` (done)
+8. `07-ignition-and-butane` (done)
+9. `08-bootstrap-and-bootkube` (done)
+10. `09-etcd-and-control-plane` (done)
+11. `10-pivot-and-mco-handoff` (done)
+12. `11-worker-join-and-csr-flow` (done)
+13. `12-cluster-operators-and-cvo` (done)
+14. `13-day2-and-upgrades` (done)
+15. `14-assisted-and-agent-based-flows` (done)
+16. `15-validation-and-troubleshooting` (done)
+17. `16-manual-install-runbook` (planned)
 
 **Open questions**
 - Baseline version pinned to 4.18 (from local PDFs). Decide how to present deltas for newer versions.
 - Which path(s) to validate first on the provided bare metal (manual UPI-like or Assisted/ABI internals).
+- How far to go in manual asset generation before using any installer as a reference.
