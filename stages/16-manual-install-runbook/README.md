@@ -21,6 +21,7 @@ This is the core hard-way runbook. It is intentionally explicit and hands-on. Ev
 - Complete the network and DNS requirements in `stages/04-lab-and-network-prereqs/README.md`.
 - Have a pull secret (for release image access).
 - Have `podman`, `oc`, and `coreos-installer` available.
+- Have `python3` and `envsubst` (gettext) for artifact rendering.
 
 ## 1. Set cluster variables
 
