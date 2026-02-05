@@ -2,6 +2,8 @@
 
 This is the core hard-way runbook. It is intentionally explicit and hands-on. Every command is written out, and every artifact is generated in-repo. This is educational and not supported for production.
 
+If you want the pure KTHW style with zero helper scripts, use `stages/16-manual-install-runbook/MANUAL-COMMANDS.md`.
+
 **Decision notes**
 - PKI generation uses `openssl` instead of `cfssl` to avoid extra dependencies.
 - All generated secrets are committed as examples by design.
