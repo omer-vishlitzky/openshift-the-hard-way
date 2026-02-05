@@ -1,6 +1,6 @@
-# Stage 02: Architecture Map
+# Stage 03: Architecture Map
 
-This stage produces a shared mental model of how OpenShift 4.18 is assembled on bare metal, with emphasis on the bootstrap and pivot process and the artifacts that drive it.
+This stage builds a concrete, component-level map of how OpenShift 4.18 comes to life on bare metal. If you are new to Kubernetes or OpenShift, read `stages/02-foundations/README.md` first.
 
 **Sources used in this stage**
 - `../pdfs/openshift/Installation_overview.pdf`
@@ -11,19 +11,12 @@ This stage produces a shared mental model of how OpenShift 4.18 is assembled on 
 
 **Scope**
 - HA is the primary flow.
-- SNO differences are described as notes when they change the mechanics.
+- SNO differences are described when they change the mechanics.
 - Focus is on how the system works under the hood, not on a single installer path.
 
-**Core building blocks**
-- Control plane: etcd, kube-apiserver, kube-controller-manager, kube-scheduler.
-- Compute nodes: run user workloads.
-- RHCOS: immutable OS image used by all nodes.
-- Ignition: first-boot provisioning that partitions disks, writes files, and configures users.
-- Operators: controllers that reconcile desired state. Critical early operators include CVO and MCO.
-- Bootstrap machine: temporary control plane that seeds the production control plane.
+## System map at a glance
 
-**Artifact and configuration flow**
-OpenShift installation uses three asset types: `install-config.yaml`, Kubernetes manifests, and Ignition configs. The install-config is transformed into manifests, and manifests are wrapped into Ignition configs for each machine type. These Ignition configs are what the nodes actually consume to build the cluster.
+OpenShift installation is a pipeline of artifacts that become running components.
 
 ```mermaid
 flowchart LR
@@ -32,64 +25,77 @@ flowchart LR
   C --> D[Bootstrap machine]
   C --> E[Control plane nodes]
   C --> F[Compute nodes]
+  D --> G[Temporary control plane]
+  G --> H[Production control plane]
+  H --> I[Cluster Operators]
+  I --> J[Workloads]
 ```
 
-**Bootstrap and pivot sequence (HA)**
-The official installation overview describes the bootstrap process as a sequence where a temporary bootstrap machine stands up the initial control plane, which then pivots to the production control plane.
+## Component responsibilities (what each part actually does)
 
-1. Bootstrap machine starts and hosts the remote resources required for control plane nodes to boot.
-2. Bootstrap machine starts a single-node etcd and a temporary Kubernetes control plane.
-3. Control plane nodes fetch resources from the bootstrap machine and finish booting.
-4. Temporary control plane schedules the production control plane on the control plane nodes.
-5. CVO comes online and installs the etcd Operator.
-6. Etcd Operator scales etcd to all control plane nodes.
-7. Temporary control plane shuts down and hands off to the production control plane.
-8. Bootstrap machine injects OpenShift components into the production control plane.
-9. Installation program shuts down the bootstrap machine.
-10. Control plane sets up compute nodes and additional Operators.
+| Component | What it does | Why it matters during install |
+| --- | --- | --- |
+| Bootstrap machine | Runs a temporary control plane | Seeds the production control plane |
+| Machine Config Server (MCS) | Serves Ignition to nodes | Control plane nodes fetch Ignition from here |
+| etcd | Stores cluster state | Must reach quorum for control plane to stabilize |
+| kube-apiserver | Serves API | All nodes and operators depend on it |
+| kube-controller-manager | Reconciles resources | Drives desired state convergence |
+| kube-scheduler | Places pods | Operators rely on scheduling |
+| Cluster Version Operator (CVO) | Applies release payload | Owns platform version and updates |
+| Machine Config Operator (MCO) | Applies node config and OS changes | Enforces node configuration after bootstrap |
+| Assisted service | Manages clusters and hosts | Provides Ignition and install orchestration |
+| Agent | Reports inventory and executes steps | Enables Assisted and Agent-based flows |
+| Installer (assisted-installer) | Writes RHCOS to disk | Performs the actual OS installation |
 
-**SNO note**
-Single Node OpenShift collapses bootstrap and control plane into a single node. The same logical phases occur, but the bootstrap and pivot steps run on the same machine.
+## Artifact flow (what gets produced and consumed)
 
-**Network and DNS baseline (UPI and bare metal)**
-The bare metal installation docs list required DNS records and load balancers. These are the core records for HA:
-- `api.<cluster>.<base_domain>` points to the API load balancer and must resolve both inside and outside the cluster.
-- `api-int.<cluster>.<base_domain>` points to the internal API load balancer and must resolve inside the cluster.
-- `*.apps.<cluster>.<base_domain>` points to the application ingress load balancer.
-- `bootstrap.<cluster>.<base_domain>` points to the bootstrap machine during install.
-- `<control-plane><n>.<cluster>.<base_domain>` records for each control plane node.
-- `<compute><n>.<cluster>.<base_domain>` records for each compute node.
+| Artifact | Produced by | Consumed by | Why it exists |
+| --- | --- | --- | --- |
+| `install-config.yaml` | You (or Assisted service UI/API) | Installer, Assisted service | Source of cluster intent |
+| Manifests | Installer or service | Bootstrap process | Defines cluster components |
+| Ignition configs | Installer or service | Booting nodes | First-boot provisioning for RHCOS |
+| Release image | Red Hat registry | CVO | Single versioned source of platform manifests |
 
-**Installer variants (mechanics view)**
-This project avoids hard-coding a single installer path. Instead, we map how each approach supplies the same artifacts and flows.
+## Bootstrap and pivot sequence (HA)
 
-| Method | Who provisions infra | How nodes get Ignition | Discovery agent | Best fit |
-| --- | --- | --- | --- | --- |
-| IPI (not bare metal) | Installer | Installer-managed | No | Cloud platforms with API integration |
-| UPI | User | User serves or injects Ignition | No | Full control, maximum manual steps |
-| Assisted Installer | Assisted service + agent | Generated and delivered by service | Yes | Interactive install with validations |
-| Agent-based Installer | Local embedded service + agent | Generated locally and embedded in image | Yes | Disconnected environments |
+The installation overview defines these phases. The list below adds the practical cause-and-effect.
 
-**Assisted and Agent-based architecture (high-level)**
-- Assisted service: API and state machine for clusters and hosts.
-- Assisted image service: creates discovery images with embedded identity and service endpoints.
-- Agent: runs on the discovery image, reports inventory, executes steps.
-- Installer: runs as a privileged container to install RHCOS to disk.
+1. Bootstrap machine starts and hosts remote resources required for control plane nodes to boot.
+2. Bootstrap machine starts a single-node etcd and a temporary API server.
+3. Control plane nodes fetch Ignition from the Machine Config Server on the bootstrap node.
+4. Control plane nodes start their own static pods for the control plane.
+5. The temporary control plane schedules the production control plane.
+6. CVO starts and installs the etcd Operator.
+7. etcd scales out to all control plane nodes and reaches quorum.
+8. The temporary control plane shuts down and hands off to the production control plane.
+9. The bootstrap machine is removed from the API and MCS load balancer pools.
+10. The control plane configures compute nodes and installs additional Operators.
 
-```mermaid
-flowchart LR
-  S[Assisted service] --> I[Assisted image service]
-  I --> ISO[Discovery image]
-  ISO --> A[Agent on host]
-  A --> S
-  S --> Inst[Installer on host]
-```
+## What changes in SNO
 
-**Key takeaways**
-- The cluster is built from Ignition configs derived from a single install-config input.
-- Bootstrap is a temporary control plane; production control plane assumes control after pivot.
-- In HA, etcd scales from bootstrap to a multi-node cluster under operator control.
-- Assisted and Agent-based installers wrap the same underlying mechanics with agent-driven discovery and provisioning.
+Single Node OpenShift collapses bootstrap and control plane into the same node. The sequence above still occurs, but bootstrap and pivot are local operations on a single machine, not a handoff between machines.
+
+## Installer variants, same mechanics
+
+Every installer method produces the same three assets and runs the same bootstrap phases. What changes is who generates the assets and how nodes receive Ignition.
+
+| Method | Who generates assets | How nodes receive Ignition | Discovery agent |
+| --- | --- | --- | --- |
+| UPI | You run `openshift-install` | You host or inject Ignition | No |
+| Assisted Installer | Assisted service | Service delivers Ignition | Yes |
+| Agent-based Installer | Local embedded service | Embedded in discovery image | Yes |
+
+## Observability hooks (when you have a cluster)
+
+These are not required now, but they anchor the architecture to real signals once you start testing.
+
+- `oc get clusterversion`
+- `oc get clusteroperators`
+- `oc get nodes -o wide`
+- `oc -n openshift-etcd get pods`
+- `oc -n openshift-machine-config-operator get pods`
+- `oc -n openshift-kube-apiserver get pods`
 
 **Deliverables for this stage**
-- Architecture map and flow diagrams for HA installation and bootstrap pivot.
+- A component-level map of how the cluster is assembled.
+- A clear bootstrap and pivot timeline tied to actual components.
