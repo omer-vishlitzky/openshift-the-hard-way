@@ -4,6 +4,15 @@ set -euo pipefail
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # shellcheck source=../config/cluster-vars.sh
 source "${ROOT_DIR}/config/cluster-vars.sh"
+if [[ -f "${ROOT_DIR}/config/release-image.sh" ]]; then
+  # shellcheck source=../config/release-image.sh
+  source "${ROOT_DIR}/config/release-image.sh"
+fi
+
+if [[ -z "${RELEASE_IMAGE:-}" ]]; then
+  echo "RELEASE_IMAGE is not set. Run scripts/05-resolve-release.sh first."
+  exit 1
+fi
 
 if ! command -v oc >/dev/null 2>&1; then
   echo "oc is required"

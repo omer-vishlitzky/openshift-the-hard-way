@@ -27,8 +27,8 @@ WORKER1_IP=192.168.1.21
 BOOTSTRAP=bootstrap
 BOOTSTRAP_IP=192.168.1.9
 
-# Release image (latest 4.18, pinned)
-RELEASE_IMAGE=quay.io/openshift-release-dev/ocp-release:4.18.19-x86_64
+# Release channel (latest 4.18)
+RELEASE_CHANNEL=stable-4.18
 
 # SSH key for core user (example only)
 SSH_PUB_KEY="ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQDdn4b8lSk0Pz5qIey2Gav3+Ix+qQ8cJ1d3l1cX7bVq0bV2NwPj5x0K0e68Qx0Tg9B7a2x4W5JmZ1E3cJ6QzCBmXq1cB2QK1vM3tQ2FJ9c2p9QeG7U1b9Bv1nXg3sA7tO8kZbNreG6Xy2C2kq2uJ8xwqfUqG6sR2m3VnQ3q6s5pVbq9mU6cH2k1m2x9Yc9r4s3P2bq0KxgQkJcOa0u7XkJvN8Yx9z3mVv2z3l2vU1yYw1X3F3y0Qk0Q4pK2T3xT8M1VgP3y0x2d7X5o1o6KX6z0j6Cq7J2q8n7Y1C4rS6F1j2X9mZJz/8Qm2cX+1xR1Eer4N9EwC3V1m3p7uU6v3Xx8qg/9w== example@hardway"
