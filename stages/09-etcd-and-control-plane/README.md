@@ -46,9 +46,19 @@ oc -n openshift-etcd rsh <etcd_pod>
 Inside the pod:
 
 ```bash
+ls /etc/kubernetes/pki/etcd /etc/etcd || true
 export ETCDCTL_API=3
-etcdctl endpoint health
-etcdctl member list
+etcdctl \
+  --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+  --cert=/etc/kubernetes/pki/etcd/peer.crt \
+  --key=/etc/kubernetes/pki/etcd/peer.key \
+  endpoint health
+
+etcdctl \
+  --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+  --cert=/etc/kubernetes/pki/etcd/peer.crt \
+  --key=/etc/kubernetes/pki/etcd/peer.key \
+  member list
 ```
 
 ## Verification checks
