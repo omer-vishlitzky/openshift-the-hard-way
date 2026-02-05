@@ -21,7 +21,7 @@ If you want the pure KTHW style with zero helper scripts, use `stages/16-manual-
 ## 0. Prerequisites
 
 - Complete the network and DNS requirements in `stages/04-lab-and-network-prereqs/README.md`.
-- Have a pull secret (for release image access).
+- Have a pull secret (for release image access) and replace `stages/16-manual-install-runbook/config/pull-secret.json` with real credentials.
 - Have `podman`, `oc`, and `coreos-installer` available.
 - Have `python3` and `envsubst` (gettext) for artifact rendering.
 

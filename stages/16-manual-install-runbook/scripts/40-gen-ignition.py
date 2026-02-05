@@ -48,6 +48,8 @@ CONTROL_PLANE = [
 COMMON_FILES = [
     ("/etc/kubernetes/kubelet-config.yaml", CONFIG / "kubelet-config.yaml", 0o644),
     ("/etc/systemd/system/kubelet.service.d/20-hardway.conf", CONFIG / "systemd" / "kubelet-override.conf", 0o644),
+    ("/var/lib/kubelet/config.json", CONFIG / "pull-secret.json", 0o600),
+    ("/var/lib/containers/auth.json", CONFIG / "pull-secret.json", 0o600),
 ]
 
 DIRECTORIES = [
@@ -57,6 +59,8 @@ DIRECTORIES = [
     "/etc/kubernetes/pki/etcd",
     "/etc/kubernetes/manifests",
     "/home/core/.ssh",
+    "/var/lib/kubelet",
+    "/var/lib/containers",
 ]
 
 

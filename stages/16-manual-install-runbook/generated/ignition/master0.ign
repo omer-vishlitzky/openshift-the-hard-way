@@ -21,6 +21,12 @@
       },
       {
         "path": "/home/core/.ssh"
+      },
+      {
+        "path": "/var/lib/kubelet"
+      },
+      {
+        "path": "/var/lib/containers"
       }
     ],
     "files": [
@@ -50,6 +56,20 @@
         "mode": 420,
         "contents": {
           "source": "data:text/plain;base64,W1NlcnZpY2VdCkVudmlyb25tZW50PSJLVUJFTEVUX0tVQkVDT05GSUc9LS1rdWJlY29uZmlnPS9ldGMva3ViZXJuZXRlcy9rdWJlbGV0Lmt1YmVjb25maWciCkVudmlyb25tZW50PSJLVUJFTEVUX0NPTkZJRz0tLWNvbmZpZz0vZXRjL2t1YmVybmV0ZXMva3ViZWxldC1jb25maWcueWFtbCIKRXhlY1N0YXJ0PQpFeGVjU3RhcnQ9L3Vzci9iaW4va3ViZWxldCAkS1VCRUxFVF9LVUJFQ09ORklHICRLVUJFTEVUX0NPTkZJRwo="
+        }
+      },
+      {
+        "path": "/var/lib/kubelet/config.json",
+        "mode": 384,
+        "contents": {
+          "source": "data:text/plain;base64,ewogICJhdXRocyI6IHsKICAgICJxdWF5LmlvIjogewogICAgICAiYXV0aCI6ICJSRVBMQUNFX1dJVEhfUkVBTF9QVUxMX1NFQ1JFVCIsCiAgICAgICJlbWFpbCI6ICJleGFtcGxlQGV4YW1wbGUuY29tIgogICAgfQogIH0KfQo="
+        }
+      },
+      {
+        "path": "/var/lib/containers/auth.json",
+        "mode": 384,
+        "contents": {
+          "source": "data:text/plain;base64,ewogICJhdXRocyI6IHsKICAgICJxdWF5LmlvIjogewogICAgICAiYXV0aCI6ICJSRVBMQUNFX1dJVEhfUkVBTF9QVUxMX1NFQ1JFVCIsCiAgICAgICJlbWFpbCI6ICJleGFtcGxlQGV4YW1wbGUuY29tIgogICAgfQogIH0KfQo="
         }
       },
       {
