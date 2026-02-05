@@ -10,7 +10,7 @@ This project will be built in stages. Each stage is a self-contained directory u
 **Planned stages**
 1. `00-charter` (done)
 2. `01-sources-and-version-pin` (done)
-3. `02-architecture-map` (planned)
+3. `02-architecture-map` (done)
 4. `03-lab-and-network-prereqs` (planned)
 5. `04-release-payload-and-tools` (planned)
 6. `05-rhcos-and-ostree` (planned)
@@ -26,5 +26,5 @@ This project will be built in stages. Each stage is a self-contained directory u
 
 **Open questions**
 - Baseline version pinned to 4.18 (from local PDFs). Decide how to present deltas for newer versions.
-- Initial lab topology and hardware assumptions (SNO vs HA, IP plan, DNS/LB approach).
+- Detailed LB/DNS implementation and validation steps for the lab.
 - Which path(s) to validate first on the provided bare metal (manual UPI-like or Assisted/ABI internals).
