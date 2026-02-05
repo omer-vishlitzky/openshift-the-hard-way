@@ -12,7 +12,7 @@ This project will be built in stages. Each stage is a self-contained directory u
 2. `01-sources-and-version-pin` (done)
 3. `02-architecture-map` (done)
 4. `03-lab-and-network-prereqs` (done)
-5. `04-release-payload-and-tools` (planned)
+5. `04-release-payload-and-tools` (done)
 6. `05-rhcos-and-ostree` (planned)
 7. `06-ignition-and-butane` (planned)
 8. `07-bootstrap-and-bootkube` (planned)
