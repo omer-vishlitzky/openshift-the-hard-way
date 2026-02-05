@@ -43,6 +43,7 @@ render_for_node() {
   envsubst < "${TEMPLATES_DIR}/kube-scheduler-pod.yaml.tpl" > "${node_dir}/kube-scheduler-pod.yaml"
 }
 
+render_for_node "${BOOTSTRAP}" "${BOOTSTRAP_IP}"
 render_for_node "${MASTER0}" "${MASTER0_IP}"
 render_for_node "${MASTER1}" "${MASTER1_IP}"
 render_for_node "${MASTER2}" "${MASTER2_IP}"
