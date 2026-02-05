@@ -1,0 +1,10 @@
+apiVersion: config.openshift.io/v1
+kind: ClusterVersion
+metadata:
+  name: version
+spec:
+  channel: stable-4.18
+  clusterID: db1da393-51e7-4720-9bd4-5092358c6e80
+  desiredUpdate:
+    version: 4.18.25
+    image: quay.io/openshift-release-dev/ocp-release:4.18.25-x86_64
