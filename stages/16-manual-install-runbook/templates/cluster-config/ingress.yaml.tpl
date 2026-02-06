@@ -1,6 +1,0 @@
-apiVersion: config.openshift.io/v1
-kind: Ingress
-metadata:
-  name: cluster
-spec:
-  domain: apps.${CLUSTER_DOMAIN}

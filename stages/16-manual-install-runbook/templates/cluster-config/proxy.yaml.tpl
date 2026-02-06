@@ -1,5 +1,0 @@
-apiVersion: config.openshift.io/v1
-kind: Proxy
-metadata:
-  name: cluster
-spec: {}

@@ -1,5 +1,0 @@
-apiVersion: config.openshift.io/v1
-kind: FeatureGate
-metadata:
-  name: cluster
-spec: {}
