@@ -8,7 +8,7 @@ export BASE_DOMAIN="example.com"
 export CLUSTER_DOMAIN="${CLUSTER_NAME}.${BASE_DOMAIN}"
 
 # OpenShift Version
-export OCP_VERSION="4.14.0"
+export OCP_VERSION="4.18.0"
 export OCP_RELEASE_IMAGE="quay.io/openshift-release-dev/ocp-release:${OCP_VERSION}-x86_64"
 
 # Networking - Machine Network
@@ -50,7 +50,7 @@ export WORKER1_NAME="worker-1"
 export SSH_PUB_KEY="${HOME}/.ssh/id_rsa.pub"
 
 # Pull Secret (download from console.redhat.com)
-export PULL_SECRET_FILE="${HOME}/pull-secret.json"
+export PULL_SECRET_FILE="${HOME}/.pull-secret.json"
 
 # Working Directories
 export ASSETS_DIR="${PWD}/assets"
@@ -77,8 +77,7 @@ export WORKER_MEMORY="8192"
 export WORKER_DISK="100"
 
 # RHCOS Image
-export RHCOS_VERSION="4.14.0"
-export RHCOS_IMAGE_URL="https://mirror.openshift.com/pub/openshift-v4/dependencies/rhcos/${OCP_VERSION%.*}/${RHCOS_VERSION}/rhcos-live.x86_64.iso"
+export RHCOS_IMAGE_URL="https://mirror.openshift.com/pub/openshift-v4/dependencies/rhcos/${OCP_VERSION%.*}/latest/rhcos-live.x86_64.iso"
 
 # Derived Values (don't modify)
 export API_URL="https://api.${CLUSTER_DOMAIN}:6443"

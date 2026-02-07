@@ -6,10 +6,9 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../../config/cluster-vars.sh"
 
-RHCOS_DIR="${ASSETS_DIR}/rhcos"
+# Download directly to libvirt images dir so qemu can access it
+RHCOS_DIR="${LIBVIRT_POOL_PATH}"
 ISO_FILE="${RHCOS_DIR}/rhcos-live.x86_64.iso"
-
-mkdir -p "${RHCOS_DIR}"
 
 if [[ -f "${ISO_FILE}" ]]; then
     echo "RHCOS ISO already exists: ${ISO_FILE}"

@@ -141,6 +141,15 @@ echo ""
 
 # etcd certificates
 echo "--- etcd Certificates ---"
+
+# Bootstrap etcd peer certificate
+generate_cert "etcd-peer-bootstrap" "etcd-peer-bootstrap" "etcd-ca" "both" \
+    "bootstrap.${CLUSTER_DOMAIN}" \
+    "localhost" \
+    "${BOOTSTRAP_IP}" \
+    "127.0.0.1"
+
+# Master etcd peer certificates
 for i in 0 1 2; do
     node_name="master-${i}"
     node_ip_var="MASTER${i}_IP"
@@ -154,9 +163,10 @@ for i in 0 1 2; do
         "127.0.0.1"
 done
 
-generate_cert "etcd-server" "etcd-server" "etcd-ca" "server" \
+generate_cert "etcd-server" "etcd-server" "etcd-ca" "both" \
     "localhost" \
     "etcd.${CLUSTER_DOMAIN}" \
+    "${BOOTSTRAP_IP}" \
     "${MASTER0_IP}" \
     "${MASTER1_IP}" \
     "${MASTER2_IP}" \
@@ -167,14 +177,16 @@ echo ""
 
 # API server certificates
 echo "--- API Server Certificates ---"
-generate_cert "kube-apiserver" "kube-apiserver" "kubernetes-ca" "server" \
+generate_cert "kube-apiserver" "kube-apiserver" "kubernetes-ca" "both" \
     "kubernetes" \
     "kubernetes.default" \
     "kubernetes.default.svc" \
     "kubernetes.default.svc.cluster.local" \
     "api.${CLUSTER_DOMAIN}" \
     "api-int.${CLUSTER_DOMAIN}" \
+    "localhost" \
     "${API_VIP}" \
+    "${BOOTSTRAP_IP}" \
     "${MASTER0_IP}" \
     "${MASTER1_IP}" \
     "${MASTER2_IP}" \

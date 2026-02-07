@@ -1,262 +1,87 @@
 # Stage 09: RHCOS Installation
 
-Red Hat CoreOS (RHCOS) is the operating system for OpenShift nodes. This stage covers installing RHCOS using our Ignition configs.
+RHCOS is the immutable OS that OpenShift runs on. It ships with kubelet and CRI-O baked in — you can't install packages on it. Configuration happens entirely through Ignition at first boot.
 
-## What is RHCOS?
+## Prerequisites
 
-RHCOS is:
-- An immutable, container-focused OS
-- Based on Fedora CoreOS / RHEL
-- Configured entirely via Ignition at first boot
-- Updated atomically via rpm-ostree
-- Managed by the Machine Config Operator after bootstrap
+Before installing any node, you need:
 
-RHCOS is NOT:
-- A general-purpose Linux distribution
-- Configured via package managers (yum/dnf disabled)
-- Modified manually (changes are overwritten)
+1. **HTTP server** serving ignition files from your host:
+   ```bash
+   cd assets/ignition
+   python3 -m http.server 8080 --bind 0.0.0.0
+   ```
 
-## Installation Methods
+2. **Firewall** allowing port 8080 from the VM network:
+   ```bash
+   sudo firewall-cmd --zone=libvirt --add-port=8080/tcp
+   ```
 
-### Method 1: Live ISO with coreos-installer
+3. **VMs created** with RHCOS ISO attached (Stage 02):
+   ```bash
+   sudo ./02-infrastructure/libvirt/create-vms.sh
+   ```
 
-Boot the RHCOS live ISO and run coreos-installer:
+## Installing a Node
 
-```bash
-# On the live system
-sudo coreos-installer install /dev/sda \
-  --ignition-url=http://webserver.example.com/bootstrap.ign \
-  --insecure-ignition
-```
+Every node follows the same flow. The only difference is which ignition file you point to.
 
-### Method 2: PXE Boot
-
-Boot via PXE with kernel arguments:
-
-```
-kernel: rhcos-live-kernel
-initrd: rhcos-live-initramfs.img
-args: coreos.inst.install_dev=/dev/sda \
-      coreos.inst.ignition_url=http://webserver.example.com/bootstrap.ign \
-      coreos.live.rootfs_url=http://webserver.example.com/rhcos-live-rootfs.img
-```
-
-### Method 3: Pre-installed disk image
-
-For VMs, you can use the QCOW2 image directly:
+### Step 1: Start the VM
 
 ```bash
-# Download QCOW2
-curl -O https://mirror.openshift.com/.../rhcos-qemu.x86_64.qcow2.gz
-
-# Decompress
-gunzip rhcos-qemu.x86_64.qcow2.gz
-
-# Create VM disk from base image
-qemu-img create -f qcow2 -F qcow2 -b rhcos-qemu.x86_64.qcow2 node-disk.qcow2 100G
+sudo virsh start ocp4-bootstrap
 ```
 
-## Installing Bootstrap
+The VM boots from the RHCOS live ISO. DHCP gives it a temporary IP.
 
-### Step 1: Attach Live ISO
+### Step 2: Install to disk
 
-```bash
-virsh attach-disk ${CLUSTER_NAME}-bootstrap \
-  ${ASSETS_DIR}/rhcos/rhcos-live.x86_64.iso \
-  sda --type cdrom --mode readonly
-```
-
-### Step 2: Start VM and connect
+Open the VM console (virt-manager or `sudo virt-viewer ocp4-bootstrap`) and run:
 
 ```bash
-virsh start ${CLUSTER_NAME}-bootstrap
-virsh console ${CLUSTER_NAME}-bootstrap
-```
-
-### Step 3: Install to disk
-
-On the live system:
-
-```bash
-# Set network (if DHCP not available)
-sudo nmcli con add type ethernet con-name eth0 ifname eth0 \
-  ipv4.addresses 192.168.126.100/24 \
-  ipv4.gateway 192.168.126.1 \
-  ipv4.dns 192.168.126.1 \
-  ipv4.method manual
-
-sudo nmcli con up eth0
-
-# Install RHCOS
 sudo coreos-installer install /dev/vda \
   --ignition-url=http://192.168.126.1:8080/bootstrap.ign \
   --insecure-ignition
-
-# Reboot
 sudo reboot
 ```
 
-### Step 4: Verify bootstrap starts
+The VM shuts off after reboot (CDROM boot behavior).
 
-After reboot, SSH in:
-
-```bash
-ssh core@192.168.126.100
-
-# Check kubelet
-sudo systemctl status kubelet
-
-# Check bootkube
-sudo journalctl -u bootkube -f
-
-# Check static pods
-sudo crictl pods
-```
-
-## Installing Masters
-
-Repeat for each master (master-0, master-1, master-2):
-
-### Step 1: Boot live ISO
-
-### Step 2: Configure network
+### Step 3: Start from disk
 
 ```bash
-# master-0 example
-sudo nmcli con add type ethernet con-name eth0 ifname eth0 \
-  ipv4.addresses 192.168.126.101/24 \
-  ipv4.gateway 192.168.126.1 \
-  ipv4.dns 192.168.126.1 \
-  ipv4.method manual
-
-sudo nmcli con up eth0
+sudo virsh start ocp4-bootstrap
 ```
 
-### Step 3: Install with master ignition
+The node now boots from disk with ignition applied. It has its static IP, certificates, kubelet config — everything baked in.
 
-```bash
-sudo coreos-installer install /dev/vda \
-  --ignition-url=http://192.168.126.1:8080/master.ign \
-  --insecure-ignition
+## Node-specific ignition files
 
-sudo reboot
-```
+| Node | Ignition file | Static IP |
+|------|--------------|-----------|
+| bootstrap | `bootstrap.ign` | 192.168.126.100 |
+| master-0 | `master-0.ign` | 192.168.126.101 |
+| master-1 | `master-1.ign` | 192.168.126.102 |
+| master-2 | `master-2.ign` | 192.168.126.103 |
+| worker-0 | `worker-0.ign` | 192.168.126.110 |
+| worker-1 | `worker-1.ign` | 192.168.126.111 |
 
-### Step 4: Verify master joins
+## Installation order
 
-```bash
-ssh core@192.168.126.101
-
-# Check kubelet
-sudo systemctl status kubelet
-
-# Check for node registration (from bootstrap or working master)
-export KUBECONFIG=/etc/kubernetes/kubeconfig
-oc get nodes
-```
-
-## Installing Workers
-
-After the control plane is up:
-
-### Step 1: Boot live ISO on worker
-
-### Step 2: Configure network and install
-
-```bash
-sudo coreos-installer install /dev/vda \
-  --ignition-url=http://192.168.126.1:8080/worker.ign \
-  --insecure-ignition
-
-sudo reboot
-```
-
-### Step 3: Approve CSRs
-
-Workers require CSR approval:
-
-```bash
-# On a machine with admin kubeconfig
-export KUBECONFIG=${ASSETS_DIR}/kubeconfigs/admin.kubeconfig
-
-# List pending CSRs
-oc get csr
-
-# Approve all pending
-oc get csr -o name | xargs oc adm certificate approve
-```
-
-## Serving Ignition Files
-
-You need a web server to serve ignition files:
-
-```bash
-# Simple Python server
-cd ${IGNITION_DIR}
-python3 -m http.server 8080
-
-# Or use nginx/apache
-```
-
-For production, use HTTPS and authentication.
-
-## Kernel Arguments
-
-Common kernel arguments for RHCOS:
-
-| Argument | Purpose |
-|----------|---------|
-| `coreos.inst.install_dev=/dev/vda` | Target disk |
-| `coreos.inst.ignition_url=http://...` | Ignition URL |
-| `coreos.inst.insecure` | Allow HTTP ignition |
-| `ip=...` | Static IP configuration |
-| `rd.neednet=1` | Enable networking in initrd |
-| `console=tty0` | Console output |
-
-## Static IP via Kernel Arguments
-
-For static IP during install:
-
-```
-ip=192.168.126.100::192.168.126.1:255.255.255.0:bootstrap.ocp4.example.com:eth0:none nameserver=192.168.126.1
-```
-
-Format: `ip=<ip>::<gateway>:<netmask>:<hostname>:<interface>:none`
+1. **Bootstrap first.** Wait for API server to be healthy before booting masters.
+2. **Masters next.** They register with the bootstrap API server.
+3. **Workers last.** After the control plane is up and operators are converging.
 
 ## Verification
 
-After installation:
+After a node boots from disk:
 
 ```bash
-# Check ignition ran
-sudo journalctl -u ignition-firstboot-complete
-
-# Check RHCOS version
-rpm-ostree status
-
-# Check network
-ip addr
-
-# Check DNS resolution
-dig api.${CLUSTER_DOMAIN}
+ssh core@<node-ip>
+sudo crictl pods          # static pods running?
+sudo journalctl -u kubelet  # kubelet healthy?
 ```
-
-## Troubleshooting
-
-### Ignition fails to fetch
-- Check network connectivity
-- Verify ignition URL is accessible
-- Check firewall rules
-
-### Node doesn't register
-- Verify DNS resolves API endpoint
-- Check kubelet logs: `journalctl -u kubelet`
-- Verify certificates are correct
-
-### Disk not found
-- Use correct device name (`/dev/vda` for virtio, `/dev/sda` for SATA)
-- Check disk is attached
 
 ## What's Next
 
-In [Stage 10](../10-bootstrap/README.md), we monitor the bootstrap process and verify the control plane starts.
+In [Stage 10](../10-bootstrap/README.md), we verify the bootstrap control plane and apply cluster manifests.

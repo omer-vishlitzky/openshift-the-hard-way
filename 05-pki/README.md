@@ -2,6 +2,33 @@
 
 OpenShift uses extensive PKI for authentication and encryption. This stage explains every certificate and shows how to generate them.
 
+## Why This Stage Exists
+
+OpenShift uses **mutual TLS everywhere**. Every component authenticates to every other component using certificates:
+
+- etcd members authenticate to each other
+- API server authenticates to etcd
+- kubelets authenticate to API server
+- Users authenticate via client certificates
+- API server uses a separate CA to proxy requests to extension APIs (like metrics-server)
+
+**Why so many certificates?**
+
+Defense in depth. If one certificate is compromised, the blast radius is limited:
+- Compromised etcd peer cert? Can't access API server.
+- Compromised kubelet cert? Can't modify etcd.
+- Compromised admin cert? Time to rotate, but etcd is still secure.
+
+**Why not use `kubeadm` style auto-generation?**
+
+We generate manually to understand:
+1. What each certificate is FOR
+2. What SANs (Subject Alternative Names) it needs
+3. How CAs chain together
+4. Why certificate errors happen
+
+When you debug a "certificate signed by unknown authority" error, you'll know exactly which CA should have signed it.
+
 ## Certificate Overview
 
 OpenShift uses multiple Certificate Authorities (CAs) for different purposes:
@@ -12,17 +39,17 @@ OpenShift uses multiple Certificate Authorities (CAs) for different purposes:
                               │ (cluster trust) │
                               └────────┬────────┘
                                        │
-          ┌────────────────────────────┼────────────────────────────┐
-          │                            │                            │
-          ▼                            ▼                            ▼
+          ┌────────────────────────────┼──────────────────────────┐
+          │                            │                          │
+          ▼                            ▼                          ▼
    ┌──────────────┐           ┌──────────────┐           ┌──────────────┐
    │   etcd CA    │           │ API Server   │           │  Kubelet CA  │
    │              │           │     CA       │           │              │
-   └──────┬───────┘           └──────┬───────┘           └──────┬──────┘
-          │                          │                          │
-          ▼                          ▼                          ▼
-   etcd peer certs            API server cert            kubelet certs
-   etcd client certs          aggregator cert            client certs
+   └──────┬───────┘           └──────┬───────┘           └───────┬──────┘
+          │                          │                           │
+          ▼                          ▼                           ▼
+   etcd peer certs            API server cert              kubelet certs
+   etcd client certs          front-proxy cert             client certs
 ```
 
 ## Certificate Types
@@ -55,9 +82,8 @@ OpenShift uses multiple Certificate Authorities (CAs) for different purposes:
 - **Files**: `service-account.key`, `service-account.pub`
 
 ### 5. Front Proxy CA
-- **Purpose**: Aggregation layer authentication
-- **Signs**: Aggregator client certificate
-- **Used for**: API extension servers, metrics server
+- **Purpose**: When the API server proxies requests to extension APIs (e.g., `kubectl top` goes to metrics-server), it authenticates itself using a cert signed by this CA
+- **Signs**: Front proxy client certificate
 - **Files**: `front-proxy-ca.crt`, `front-proxy-ca.key`
 
 ## Certificate Details
@@ -97,122 +123,178 @@ OpenShift uses multiple Certificate Authorities (CAs) for different purposes:
 |-------------|---------|-----|
 | kube-scheduler | Scheduler client auth | system:kube-scheduler |
 
-## Generate All Certificates
+## Generate Certificates
+
+Every openssl command below follows the same pattern: generate a key, create a CSR (Certificate Signing Request), sign it with a CA. The only things that vary are the CN (Common Name), the CA that signs it, the usage type (server, client, or both), and the SANs (Subject Alternative Names).
 
 ```bash
-./generate.sh
-```
-
-This creates all certificates in `${ASSETS_DIR}/pki/`.
-
-## Manual Generation (Educational)
-
-### Step 1: Create Root CA
-
-```bash
+source config/cluster-vars.sh
 mkdir -p ${PKI_DIR}
 cd ${PKI_DIR}
+```
 
-# Generate root CA key
+### Certificate Authorities
+
+Root CA — the trust anchor. Everything chains back to this:
+
+```bash
+# Generate a 4096-bit RSA private key
 openssl genrsa -out root-ca.key 4096
 
-# Generate root CA certificate
+# Create a certificate directly (-x509 outputs a cert instead of a CSR).
+# Since we're not passing -CA, this cert is signed by its own key (self-signed).
+# That's what makes it a root — nothing above it.
 openssl req -x509 -new -nodes \
-  -key root-ca.key \
-  -sha256 \
-  -days 3650 \
-  -out root-ca.crt \
-  -subj "/CN=root-ca"
+  -key root-ca.key -sha256 -days 3650 \
+  -out root-ca.crt -subj "/CN=root-ca"
 ```
 
-### Step 2: Create etcd CA
+The intermediate CAs are signed by the root. Each one scopes trust to a different domain — etcd certs can't be used for API server connections and vice versa.
+
+Every non-root certificate follows a two-step process: create a CSR (Certificate Signing Request — contains your public key and identity), then have a CA sign it into a certificate.
 
 ```bash
-# Generate etcd CA key
-openssl genrsa -out etcd-ca.key 4096
-
-# Create CSR
-openssl req -new \
-  -key etcd-ca.key \
-  -out etcd-ca.csr \
-  -subj "/CN=etcd-ca"
-
-# Sign with root CA
-openssl x509 -req \
-  -in etcd-ca.csr \
-  -CA root-ca.crt \
-  -CAkey root-ca.key \
-  -CAcreateserial \
-  -out etcd-ca.crt \
-  -days 3650 \
-  -sha256 \
-  -extfile <(echo "basicConstraints=critical,CA:TRUE,pathlen:0
+for ca in etcd-ca kubernetes-ca front-proxy-ca; do
+  openssl genrsa -out ${ca}.key 4096
+  # Step 1: create a CSR — contains the public key and CN, but isn't a certificate yet
+  openssl req -new -key ${ca}.key -out ${ca}.csr -subj "/CN=${ca}"
+  # Step 2: root CA signs the CSR, producing a trusted certificate
+  # CA:TRUE marks it as a CA (can sign other certs), pathlen:0 means it can't create sub-CAs
+  openssl x509 -req -in ${ca}.csr \
+    -CA root-ca.crt -CAkey root-ca.key -CAcreateserial \
+    -out ${ca}.crt -days 3650 -sha256 \
+    -extfile <(echo "basicConstraints=critical,CA:TRUE,pathlen:0
 keyUsage=critical,keyCertSign,cRLSign")
+  rm ${ca}.csr
+done
 ```
 
-### Step 3: Create etcd Peer Certificates
+### Service Account Key Pair
 
-For each master (0, 1, 2):
+Not a certificate — an RSA key pair. KCM uses the private key to sign ServiceAccount tokens, the API server uses the public key to verify them:
 
 ```bash
-NODE_NAME="master-0"
-NODE_IP="192.168.126.101"
+openssl genrsa -out service-account.key 4096
+openssl rsa -in service-account.key -pubout -out service-account.pub
+```
 
-# Generate key
-openssl genrsa -out etcd-peer-${NODE_NAME}.key 4096
+### etcd Certificates
 
-# Create CSR
-openssl req -new \
-  -key etcd-peer-${NODE_NAME}.key \
-  -out etcd-peer-${NODE_NAME}.csr \
-  -subj "/CN=etcd-peer-${NODE_NAME}"
+etcd peer certificates — one per node. etcd members use these to authenticate to each other. Usage is `both` (serverAuth + clientAuth) because each member is both a server and a client to its peers:
 
-# Create extension file for SANs
-cat > etcd-peer-${NODE_NAME}.ext <<EOF
+```bash
+openssl genrsa -out etcd-peer-bootstrap.key 4096
+openssl req -new -key etcd-peer-bootstrap.key -out etcd-peer-bootstrap.csr \
+  -subj "/CN=etcd-peer-bootstrap"
+# SANs = all the hostnames/IPs this cert is valid for. If a client connects
+# to an IP not in the SANs, TLS fails with "certificate is not valid for"
+cat > etcd-peer-bootstrap.ext <<EOF
 basicConstraints = CA:FALSE
 keyUsage = critical, digitalSignature, keyEncipherment
 extendedKeyUsage = serverAuth, clientAuth
 subjectAltName = @alt_names
-
 [alt_names]
-DNS.1 = ${NODE_NAME}.${CLUSTER_DOMAIN}
-DNS.2 = etcd-0.${CLUSTER_DOMAIN}
-DNS.3 = localhost
-IP.1 = ${NODE_IP}
+DNS.1 = bootstrap.${CLUSTER_DOMAIN}
+DNS.2 = localhost
+IP.1 = ${BOOTSTRAP_IP}
 IP.2 = 127.0.0.1
 EOF
-
-# Sign with etcd CA
-openssl x509 -req \
-  -in etcd-peer-${NODE_NAME}.csr \
-  -CA etcd-ca.crt \
-  -CAkey etcd-ca.key \
-  -CAcreateserial \
-  -out etcd-peer-${NODE_NAME}.crt \
-  -days 365 \
-  -sha256 \
-  -extfile etcd-peer-${NODE_NAME}.ext
+# Sign with the etcd CA (not root — etcd has its own trust domain)
+openssl x509 -req -in etcd-peer-bootstrap.csr \
+  -CA etcd-ca.crt -CAkey etcd-ca.key -CAcreateserial \
+  -out etcd-peer-bootstrap.crt -days 365 -sha256 \
+  -extfile etcd-peer-bootstrap.ext
+rm etcd-peer-bootstrap.csr etcd-peer-bootstrap.ext
 ```
 
-### Step 4: Create API Server Certificate
+Master etcd peer certificates — repeat for each master:
 
 ```bash
-# Generate key
+for i in 0 1 2; do
+  node_ip_var="MASTER${i}_IP"
+  node_ip="${!node_ip_var}"
+
+  openssl genrsa -out etcd-peer-master-${i}.key 4096
+  openssl req -new -key etcd-peer-master-${i}.key -out etcd-peer-master-${i}.csr \
+    -subj "/CN=etcd-peer-master-${i}"
+  cat > etcd-peer-master-${i}.ext <<EOF
+basicConstraints = CA:FALSE
+keyUsage = critical, digitalSignature, keyEncipherment
+extendedKeyUsage = serverAuth, clientAuth
+subjectAltName = @alt_names
+[alt_names]
+DNS.1 = master-${i}.${CLUSTER_DOMAIN}
+DNS.2 = etcd-${i}.${CLUSTER_DOMAIN}
+DNS.3 = localhost
+IP.1 = ${node_ip}
+IP.2 = 127.0.0.1
+EOF
+  openssl x509 -req -in etcd-peer-master-${i}.csr \
+    -CA etcd-ca.crt -CAkey etcd-ca.key -CAcreateserial \
+    -out etcd-peer-master-${i}.crt -days 365 -sha256 \
+    -extfile etcd-peer-master-${i}.ext
+  rm etcd-peer-master-${i}.csr etcd-peer-master-${i}.ext
+done
+```
+
+etcd server certificate — clients (like the API server) connect to etcd using this. SANs include all nodes that run etcd:
+
+```bash
+openssl genrsa -out etcd-server.key 4096
+openssl req -new -key etcd-server.key -out etcd-server.csr \
+  -subj "/CN=etcd-server"
+cat > etcd-server.ext <<EOF
+basicConstraints = CA:FALSE
+keyUsage = critical, digitalSignature, keyEncipherment
+extendedKeyUsage = serverAuth, clientAuth
+subjectAltName = @alt_names
+[alt_names]
+DNS.1 = localhost
+DNS.2 = etcd.${CLUSTER_DOMAIN}
+IP.1 = ${BOOTSTRAP_IP}
+IP.2 = ${MASTER0_IP}
+IP.3 = ${MASTER1_IP}
+IP.4 = ${MASTER2_IP}
+IP.5 = 127.0.0.1
+EOF
+openssl x509 -req -in etcd-server.csr \
+  -CA etcd-ca.crt -CAkey etcd-ca.key -CAcreateserial \
+  -out etcd-server.crt -days 365 -sha256 \
+  -extfile etcd-server.ext
+rm etcd-server.csr etcd-server.ext
+```
+
+etcd client certificate — the API server presents this when connecting to etcd:
+
+```bash
+openssl genrsa -out etcd-client.key 4096
+openssl req -new -key etcd-client.key -out etcd-client.csr \
+  -subj "/CN=system:etcd-client"
+# clientAuth only — this cert proves identity to etcd, it doesn't serve connections
+openssl x509 -req -in etcd-client.csr \
+  -CA etcd-ca.crt -CAkey etcd-ca.key -CAcreateserial \
+  -out etcd-client.crt -days 365 -sha256 \
+  -extfile <(echo "basicConstraints=CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=clientAuth")
+rm etcd-client.csr
+```
+
+### API Server Certificates
+
+API server serving certificate — this is what clients see when they connect to `https://api.ocp4.example.com:6443`. The SANs must include every name and IP the API server can be reached at, including `172.30.0.1` (the `kubernetes` Service ClusterIP):
+
+```bash
 openssl genrsa -out kube-apiserver.key 4096
-
-# Create CSR
-openssl req -new \
-  -key kube-apiserver.key \
-  -out kube-apiserver.csr \
+openssl req -new -key kube-apiserver.key -out kube-apiserver.csr \
   -subj "/CN=kube-apiserver"
-
-# Create extension file
+# SANs are critical here — every hostname and IP the API server can be reached at.
+# Missing a SAN = "x509: certificate is valid for X, not Y" errors.
 cat > kube-apiserver.ext <<EOF
 basicConstraints = CA:FALSE
 keyUsage = critical, digitalSignature, keyEncipherment
-extendedKeyUsage = serverAuth
+extendedKeyUsage = serverAuth, clientAuth
 subjectAltName = @alt_names
-
 [alt_names]
 DNS.1 = kubernetes
 DNS.2 = kubernetes.default
@@ -220,131 +302,136 @@ DNS.3 = kubernetes.default.svc
 DNS.4 = kubernetes.default.svc.cluster.local
 DNS.5 = api.${CLUSTER_DOMAIN}
 DNS.6 = api-int.${CLUSTER_DOMAIN}
+DNS.7 = localhost
 IP.1 = ${API_VIP}
-IP.2 = ${MASTER0_IP}
-IP.3 = ${MASTER1_IP}
-IP.4 = ${MASTER2_IP}
-IP.5 = 127.0.0.1
-IP.6 = 172.30.0.1
+IP.2 = ${BOOTSTRAP_IP}
+IP.3 = ${MASTER0_IP}
+IP.4 = ${MASTER1_IP}
+IP.5 = ${MASTER2_IP}
+IP.6 = 127.0.0.1
+IP.7 = 172.30.0.1
 EOF
-
-# Sign
-openssl x509 -req \
-  -in kube-apiserver.csr \
-  -CA kubernetes-ca.crt \
-  -CAkey kubernetes-ca.key \
-  -CAcreateserial \
-  -out kube-apiserver.crt \
-  -days 365 \
-  -sha256 \
+openssl x509 -req -in kube-apiserver.csr \
+  -CA kubernetes-ca.crt -CAkey kubernetes-ca.key -CAcreateserial \
+  -out kube-apiserver.crt -days 365 -sha256 \
   -extfile kube-apiserver.ext
+rm kube-apiserver.csr kube-apiserver.ext
 ```
 
-### Step 5: Create Service Account Key
+API server → kubelet client certificate. The API server presents this when connecting to kubelet (for `kubectl logs`, `kubectl exec`, etc.):
 
 ```bash
-# Generate RSA key pair
-openssl genrsa -out service-account.key 4096
-
-# Extract public key
-openssl rsa -in service-account.key -pubout -out service-account.pub
-```
-
-### Step 6: Create Admin Certificate
-
-```bash
-# Generate key
-openssl genrsa -out admin.key 4096
-
-# Create CSR
-openssl req -new \
-  -key admin.key \
-  -out admin.csr \
-  -subj "/CN=system:admin/O=system:masters"
-
-# Sign
-openssl x509 -req \
-  -in admin.csr \
-  -CA kubernetes-ca.crt \
-  -CAkey kubernetes-ca.key \
-  -CAcreateserial \
-  -out admin.crt \
-  -days 365 \
-  -sha256 \
+openssl genrsa -out kube-apiserver-kubelet-client.key 4096
+openssl req -new -key kube-apiserver-kubelet-client.key -out kube-apiserver-kubelet-client.csr \
+  -subj "/CN=system:kube-apiserver"
+openssl x509 -req -in kube-apiserver-kubelet-client.csr \
+  -CA kubernetes-ca.crt -CAkey kubernetes-ca.key -CAcreateserial \
+  -out kube-apiserver-kubelet-client.crt -days 365 -sha256 \
   -extfile <(echo "basicConstraints=CA:FALSE
 keyUsage=critical,digitalSignature,keyEncipherment
 extendedKeyUsage=clientAuth")
+rm kube-apiserver-kubelet-client.csr
 ```
 
-## Certificate Tree
+### Control Plane Client Certificates
 
-After generation:
-```
-${PKI_DIR}/
-├── root-ca.crt
-├── root-ca.key
-├── etcd-ca.crt
-├── etcd-ca.key
-├── etcd-peer-master-0.crt
-├── etcd-peer-master-0.key
-├── etcd-peer-master-1.crt
-├── etcd-peer-master-1.key
-├── etcd-peer-master-2.crt
-├── etcd-peer-master-2.key
-├── etcd-server.crt
-├── etcd-server.key
-├── etcd-client.crt
-├── etcd-client.key
-├── kubernetes-ca.crt
-├── kubernetes-ca.key
-├── kube-apiserver.crt
-├── kube-apiserver.key
-├── kube-apiserver-kubelet-client.crt
-├── kube-apiserver-kubelet-client.key
-├── front-proxy-ca.crt
-├── front-proxy-ca.key
-├── front-proxy-client.crt
-├── front-proxy-client.key
-├── service-account.key
-├── service-account.pub
-├── admin.crt
-├── admin.key
-├── kube-controller-manager.crt
-├── kube-controller-manager.key
-├── kube-scheduler.crt
-└── kube-scheduler.key
-```
-
-## Verification
+KCM, scheduler, and admin all need client certificates to authenticate to the API server. The CN determines the identity — Kubernetes RBAC uses it for authorization:
 
 ```bash
-./verify.sh
+# Controller manager — the CN (system:kube-controller-manager) is the RBAC identity.
+# Kubernetes maps the CN from the client cert to a user for authorization.
+openssl genrsa -out kube-controller-manager.key 4096
+openssl req -new -key kube-controller-manager.key -out kube-controller-manager.csr \
+  -subj "/CN=system:kube-controller-manager"
+openssl x509 -req -in kube-controller-manager.csr \
+  -CA kubernetes-ca.crt -CAkey kubernetes-ca.key -CAcreateserial \
+  -out kube-controller-manager.crt -days 365 -sha256 \
+  -extfile <(echo "basicConstraints=CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=clientAuth")
+rm kube-controller-manager.csr
+
+# Scheduler
+openssl genrsa -out kube-scheduler.key 4096
+openssl req -new -key kube-scheduler.key -out kube-scheduler.csr \
+  -subj "/CN=system:kube-scheduler"
+openssl x509 -req -in kube-scheduler.csr \
+  -CA kubernetes-ca.crt -CAkey kubernetes-ca.key -CAcreateserial \
+  -out kube-scheduler.crt -days 365 -sha256 \
+  -extfile <(echo "basicConstraints=CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=clientAuth")
+rm kube-scheduler.csr
+
+# Admin — O=system:masters is a special group in Kubernetes RBAC
+# that's bound to cluster-admin. The CN is the username, O is the group.
+openssl genrsa -out admin.key 4096
+openssl req -new -key admin.key -out admin.csr \
+  -subj "/CN=system:admin/O=system:masters"
+openssl x509 -req -in admin.csr \
+  -CA kubernetes-ca.crt -CAkey kubernetes-ca.key -CAcreateserial \
+  -out admin.crt -days 365 -sha256 \
+  -extfile <(echo "basicConstraints=CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=clientAuth")
+rm admin.csr
 ```
 
-Checks:
-- All certificates exist
-- Certificates are signed by correct CA
-- SANs are correct
-- Certificates are not expired
+### Front Proxy Client Certificate
+
+The API server uses this when proxying requests to extension APIs:
+
+```bash
+openssl genrsa -out front-proxy-client.key 4096
+openssl req -new -key front-proxy-client.key -out front-proxy-client.csr \
+  -subj "/CN=front-proxy-client"
+openssl x509 -req -in front-proxy-client.csr \
+  -CA front-proxy-ca.crt -CAkey front-proxy-ca.key -CAcreateserial \
+  -out front-proxy-client.crt -days 365 -sha256 \
+  -extfile <(echo "basicConstraints=CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=clientAuth")
+rm front-proxy-client.csr
+```
+
+### Bootstrap Certificate
+
+Kubelet uses this for its initial connection to the API server to request a real node certificate (via CSR):
+
+```bash
+openssl genrsa -out kubelet-bootstrap.key 4096
+openssl req -new -key kubelet-bootstrap.key -out kubelet-bootstrap.csr \
+  -subj "/CN=system:bootstrapper"
+openssl x509 -req -in kubelet-bootstrap.csr \
+  -CA kubernetes-ca.crt -CAkey kubernetes-ca.key -CAcreateserial \
+  -out kubelet-bootstrap.crt -days 365 -sha256 \
+  -extfile <(echo "basicConstraints=CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=clientAuth")
+rm kubelet-bootstrap.csr
+```
+
+### Verify
+
+Check that all certificates were generated and are signed by the correct CA:
+
+```bash
+ls ${PKI_DIR}/*.crt | wc -l
+
+# Verify a cert is signed by its CA. Since intermediate CAs are signed by root,
+# openssl needs the full chain (root + intermediate) to verify leaf certs.
+openssl verify -CAfile <(cat ${PKI_DIR}/root-ca.crt ${PKI_DIR}/etcd-ca.crt) ${PKI_DIR}/etcd-server.crt
+openssl verify -CAfile <(cat ${PKI_DIR}/root-ca.crt ${PKI_DIR}/kubernetes-ca.crt) ${PKI_DIR}/kube-apiserver.crt
+```
 
 ## Important Notes
 
 ### Certificate Lifetimes
 - CAs: 10 years (long-lived)
-- Server/client certs: 1 year (rotated by operators)
+- Server/client certs: 1 year (rotated by operators after bootstrap)
 
 ### Operator Rotation
-In a running cluster, operators rotate certificates:
-- `cluster-kube-apiserver-operator` rotates API server certs
-- `cluster-etcd-operator` rotates etcd certs
-- `machine-config-operator` rotates kubelet certs
-
-For manual installation, we generate initial certs. Operators take over after bootstrap.
-
-### Security
-- Keep CA keys secure
-- Never commit keys to git
-- In production, use HSM for CA keys
+In a running cluster, operators rotate certificates automatically. We generate the initial set — operators take over after bootstrap.
 
 ## What's Next
 

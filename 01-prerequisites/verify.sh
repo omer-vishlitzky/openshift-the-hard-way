@@ -55,19 +55,17 @@ check_command jq "jq"
 check_command virsh "libvirt (virsh)"
 check_command virt-install "virt-install"
 
-echo ""
-echo "--- Optional Tools (used in later stages) ---"
-check_command openshift-install "openshift-install"
-check_command butane "Butane"
-check_command coreos-installer "coreos-installer"
+# Source cluster vars for file paths
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/../config/cluster-vars.sh" 2>/dev/null || true
 
 echo ""
 echo "--- Files ---"
-check_file "${HOME}/.ssh/id_rsa.pub" "SSH public key"
-check_file "${HOME}/pull-secret.json" "Pull secret"
+check_file "${SSH_PUB_KEY:-${HOME}/.ssh/id_rsa.pub}" "SSH public key"
+check_file "${PULL_SECRET_FILE:-${HOME}/.pull-secret.json}" "Pull secret"
 
-if [[ -f "${HOME}/pull-secret.json" ]]; then
-    if jq . "${HOME}/pull-secret.json" > /dev/null 2>&1; then
+if [[ -f "${PULL_SECRET_FILE:-${HOME}/.pull-secret.json}" ]]; then
+    if jq . "${PULL_SECRET_FILE:-${HOME}/.pull-secret.json}" > /dev/null 2>&1; then
         echo -e "${GREEN}✓${NC} Pull secret: valid JSON"
     else
         echo -e "${RED}✗${NC} Pull secret: invalid JSON"
@@ -108,9 +106,11 @@ else
     echo -e "${GREEN}✓${NC} Memory sufficient"
 fi
 
-echo "Available disk: ${available_disk}GB (need 200+)"
-if [[ $available_disk -lt 200 ]]; then
-    echo -e "${RED}✗${NC} Insufficient disk space"
+pool_parent=$(dirname "${LIBVIRT_POOL_PATH:-/var/lib/libvirt/images/ocp4}")
+pool_disk=$(df -BG "$pool_parent" 2>/dev/null | awk 'NR==2 {print $4}' | tr -d 'G')
+echo "Available disk on ${pool_parent}: ${pool_disk}GB (need 50+, VM disks are thin-provisioned)"
+if [[ $pool_disk -lt 50 ]]; then
+    echo -e "${RED}✗${NC} Insufficient disk space for libvirt pool"
     errors=$((errors + 1))
 else
     echo -e "${GREEN}✓${NC} Disk space sufficient"

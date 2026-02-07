@@ -62,8 +62,6 @@ frontend kubernetes-api
 
 backend kubernetes-api-backend
     balance roundrobin
-    option httpchk GET /readyz HTTP/1.0
-    http-check expect status 200
     # Bootstrap (remove after cluster is up)
     server ${BOOTSTRAP_NAME} ${BOOTSTRAP_IP}:6443 check
     # Masters
@@ -93,8 +91,6 @@ frontend ingress-http
 
 backend ingress-http-backend
     balance roundrobin
-    option httpchk GET /healthz/ready HTTP/1.0
-    http-check expect status 200
     # Workers (or masters in compact cluster)
     server ${WORKER0_NAME} ${WORKER0_IP}:80 check
     server ${WORKER1_NAME} ${WORKER1_IP}:80 check
@@ -106,7 +102,6 @@ frontend ingress-https
 
 backend ingress-https-backend
     balance roundrobin
-    option httpchk GET /healthz/ready HTTP/1.0
     http-check expect status 200
     # Workers (or masters in compact cluster)
     server ${WORKER0_NAME} ${WORKER0_IP}:443 check
@@ -130,6 +125,13 @@ fi
 echo "Installing to ${CONFIG_FILE}"
 sudo cp /tmp/haproxy-${CLUSTER_NAME}.cfg "${CONFIG_FILE}"
 rm /tmp/haproxy-${CLUSTER_NAME}.cfg
+
+# Open firewall ports so VMs can reach HAProxy
+echo "Opening firewall ports..."
+sudo firewall-cmd --zone=libvirt --add-port=6443/tcp 2>/dev/null || true
+sudo firewall-cmd --zone=libvirt --add-port=22623/tcp 2>/dev/null || true
+sudo firewall-cmd --zone=libvirt --add-port=80/tcp 2>/dev/null || true
+sudo firewall-cmd --zone=libvirt --add-port=443/tcp 2>/dev/null || true
 
 # Enable and restart HAProxy
 echo "Restarting HAProxy..."

@@ -1,15 +1,20 @@
 # Stage 11: Control Plane Formation
 
-Masters join the cluster and etcd scales from 1 to 3 members. This is a critical phase.
+Masters join the cluster, kube-proxy enables Service routing, operators begin deploying, and etcd scales from 1 to 3 members. This is the most complex phase.
 
 ## What Happens
 
 ```
 Time 0:  Bootstrap running, etcd=1, API=bootstrap
          ↓
-         Boot masters
+         Boot masters (each has: kubelet, kube-proxy, CRI-O config, apiserver-url.env)
          ↓
-Time +5m: Masters register as nodes
+Time +5m: Masters register as nodes (CSRs approved)
+         kube-proxy starts on masters → ClusterIP routing works
+         ↓
+         CVO deploys operators → operators can reach API via 172.30.0.1
+         ↓
+Time +10m: etcd-operator adds master-0 to etcd cluster
          ↓
 Time +10m: etcd-operator adds master-0 to etcd cluster
           etcd=2 (bootstrap + master-0)
@@ -47,32 +52,59 @@ sudo journalctl -u kubelet -f
 ```
 
 The master:
-1. Boots RHCOS
-2. Fetches ignition from MCS (https://api-int:22623/config/master)
-3. Applies ignition
-4. Starts kubelet
-5. Kubelet registers with API server
+1. Boots RHCOS with its complete ignition config
+2. Starts kubelet
+3. Kubelet uses bootstrap kubeconfig (CN=`system:bootstrapper`) to connect to the API
+4. Kubelet creates a CSR asking for a client certificate
+5. You approve the CSR manually
+6. Kubelet gets its client cert, registers as a node
+7. Kubelet creates a SECOND CSR for its serving certificate
+8. You approve that too
 
-## Step 3: Verify Node Registration
+**Why two CSRs?** The first CSR (`kube-apiserver-client-kubelet`) is the kubelet's identity — how it authenticates TO the API server. The second CSR (`kubelet-serving`) is the kubelet's TLS cert — how other components (like the API server doing `kubectl logs`) connect TO the kubelet.
 
-From your workstation:
+## Step 3: Approve CSRs and verify nodes
 
 ```bash
 export KUBECONFIG=${ASSETS_DIR}/kubeconfigs/admin.kubeconfig
 
-# Watch nodes appear
-watch oc get nodes
+# Check for pending CSRs
+oc get csr
 
-# Should eventually show:
-# NAME       STATUS   ROLES    AGE
-# master-0   Ready    master   5m
-# master-1   Ready    master   4m
-# master-2   Ready    master   3m
+# Approve all pending CSRs (first wave — client certs)
+oc get csr -o name | xargs oc adm certificate approve
+
+# Wait 15 seconds, then approve second wave (serving certs)
+sleep 15
+oc get csr -o name | xargs oc adm certificate approve
+
+# Verify nodes registered
+oc get nodes
 ```
+
+Nodes will show `NotReady` initially — that's normal until the network operator deploys a CNI plugin.
+
+## DO NOT shut down the bootstrap yet
+
+bootkube.sh will print "Bootstrap Complete" when it sees 3/3 masters registered. **This does NOT mean the bootstrap is safe to remove.**
+
+The bootstrap is still running:
+- **The only etcd** — masters don't have etcd yet
+- **The only API server** — masters don't have API server pods yet
+- **CVO** — still deploying operators as a static pod
+
+What needs to happen before you can remove the bootstrap:
+1. CVO (on bootstrap) deploys operator Deployments → scheduler places them on masters
+2. etcd-operator deploys etcd pods on each master → etcd scales 1 → 3
+3. kube-apiserver-operator deploys API server pods on masters
+4. Once etcd has 3 members on masters and API servers are running there, the bootstrap becomes redundant
+5. **Then** you remove bootstrap from HAProxy and shut it down (Stage 12)
+
+**Where is CVO running?** On the bootstrap, as a static pod. It talks to the API server on localhost and applies manifests from the release image. Those manifests create Deployments that the scheduler places on masters. CVO runs on bootstrap, but the operators it deploys run on masters.
 
 ## Step 4: Watch etcd Scaling
 
-The etcd-operator handles scaling from 1 to 3 members.
+The etcd-operator (deployed by CVO) handles scaling from 1 to 3 members.
 
 ### Monitor etcd membership
 
@@ -214,7 +246,7 @@ sudo journalctl -u kubelet
 # Common issues:
 # - Can't reach API (DNS, network)
 # - Certificate errors
-# - MCS not serving config
+# - Bootstrap kubeconfig invalid
 ```
 
 ### etcd member not joining

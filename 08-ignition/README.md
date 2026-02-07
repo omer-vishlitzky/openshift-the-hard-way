@@ -2,6 +2,24 @@
 
 Ignition is the configuration system used by RHCOS. It runs once at first boot and configures the entire system.
 
+## Why This Stage Exists
+
+This is where everything comes together. All previous stages produced artifacts:
+- Stage 04: MCO rendered ignition (OS-level node config)
+- Stage 05: PKI certificates
+- Stage 06: Kubeconfigs
+- Stage 07: Static pod manifests
+
+Ignition is the delivery mechanism - it packages all these artifacts into a single JSON file that RHCOS applies at first boot.
+
+**Why not just copy files manually?**
+1. **Reproducibility**: The ignition config IS the complete system state. Rebuild any node by reapplying ignition.
+2. **Atomicity**: Ignition applies everything or nothing. No partial configurations.
+3. **No SSH needed**: Nodes configure themselves. No post-boot scripting required.
+4. **Immutability**: Once configured, the node shouldn't drift. MCO handles any changes.
+
+All ignition configs are complete — each node has everything it needs. No intermediary (MCS) needed. This is the KTHW approach: you configure each node explicitly.
+
 ## What is Ignition?
 
 Ignition:
@@ -38,26 +56,27 @@ Ignition is NOT:
 ## What We Need to Build
 
 ### bootstrap.ign
-Large (~280KB), contains everything to bootstrap:
+Largest — contains everything to start the control plane:
 - All certificates and keys
 - All kubeconfigs
 - Static pod manifests
 - bootkube.sh script
-- Machine Config Server
 - kubelet configuration
 - Pull secret
 
-### master.ign
-Small (~1.7KB), contains:
-- Root CA certificate
-- Pointer to MCS for full config
-- SSH authorized keys
+### master-N.ign
+MCO's rendered master ignition as the base (OVS bridges, kubelet.service, CRI-O config, SELinux, NetworkManager scripts, 30+ files/units), plus our additions:
+- Per-node static IP (NetworkManager connection)
+- Bootstrap kubeconfig (we skip MCS)
+- kube-proxy static pod (ClusterIP routing until OVN takes over)
+- CA certificates and pull secret
 
-### worker.ign
-Small (~1.7KB), contains:
-- Root CA certificate
-- Pointer to MCS for full config
-- SSH authorized keys
+### worker-N.ign
+Same pattern as master but using MCO's worker ignition:
+- Per-node static IP
+- Bootstrap kubeconfig
+- CA certificate and pull secret
+- No kube-proxy (masters handle ClusterIP routing)
 
 ## Build Ignition Configs
 
@@ -123,7 +142,22 @@ This creates:
 }
 ```
 
-6. **Pull Secret**
+6. **CRI-O Pause Image Config**
+
+Every Kubernetes pod is a group of containers sharing a network namespace (same IP, same ports). But someone has to create that namespace before the real containers start. That's the **pause container** — it does nothing except hold the namespace open.
+
+CRI-O must pull the pause image before it can start ANY pod. RHCOS defaults to `registry.k8s.io/pause:3.10` which may be unreachable. We configure CRI-O to use the OpenShift pause image from the release payload:
+
+```ini
+# /etc/crio/crio.conf.d/00-pause.conf
+[crio.image]
+pause_image = "quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:..."
+pause_image_auth_file = "/var/lib/kubelet/config.json"
+```
+
+Without this, kubelet logs `registry.k8s.io/pause: connection refused` and no pods start.
+
+7. **Pull Secret**
 ```json
 {
   "path": "/var/lib/kubelet/config.json",
@@ -139,78 +173,38 @@ This creates:
 ./build-worker.sh
 ```
 
-Master and worker ignition are simple - they fetch their real config from the Machine Config Server:
+### How MCO ignition merging works
+
+Master and worker ignition uses MCO's rendered output as a base. MCO produces a complete ignition config with 30+ files and 20+ systemd units. We merge our per-node additions on top using `jq`:
+
+```
+MCO rendered ignition (base)
+  + Static IP NetworkManager config (per-node)
+  + Bootstrap kubeconfig (we skip MCS)
+  + kube-proxy static pod (masters only)
+  + CA certificates and pull secret
+  = Final master-N.ign / worker-N.ign
+```
+
+MCO handles kubelet.service, CRI-O config, OVS bridges, SELinux, and everything else a RHCOS node needs. We only add what MCO can't know (per-node IPs) and what we need for bootstrapping (kube-proxy, bootstrap kubeconfig).
+
+### How the real installer does it (vs. our approach)
+
+In the real installer, `master.ign` is tiny (~1.7KB) — just a pointer:
 
 ```json
 {
   "ignition": {
-    "version": "3.2.0",
     "config": {
-      "merge": [{
-        "source": "https://api-int.ocp4.example.com:22623/config/master"
-      }]
-    },
-    "security": {
-      "tls": {
-        "certificateAuthorities": [{
-          "source": "data:text/plain;base64,<root-ca>"
-        }]
-      }
+      "merge": [{ "source": "https://api-int:22623/config/master" }]
     }
-  },
-  "passwd": {
-    "users": [{
-      "name": "core",
-      "sshAuthorizedKeys": ["ssh-rsa ..."]
-    }]
   }
 }
 ```
 
-## Systemd Units
+**Ignition** (built into RHCOS, runs before any services) sees the `config.merge` directive, fetches the full config from the **MCS** (Machine Config Server) on the bootstrap node, and applies it.
 
-Key systemd units in bootstrap ignition:
-
-### kubelet.service
-```ini
-[Unit]
-Description=Kubernetes Kubelet
-Wants=rpc-statd.service network-online.target
-After=network-online.target
-
-[Service]
-Type=notify
-ExecStart=/usr/bin/kubelet \
-  --config=/etc/kubernetes/kubelet.conf \
-  --bootstrap-kubeconfig=/etc/kubernetes/kubeconfig \
-  --kubeconfig=/var/lib/kubelet/kubeconfig \
-  --container-runtime-endpoint=/var/run/crio/crio.sock \
-  --runtime-cgroups=/system.slice/crio.service \
-  --node-labels=node-role.kubernetes.io/master=,node.openshift.io/os_id=rhcos
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-### bootkube.service
-```ini
-[Unit]
-Description=Bootstrap the OpenShift cluster
-Wants=kubelet.service
-After=kubelet.service
-
-[Service]
-Type=oneshot
-ExecStart=/opt/openshift/bootkube.sh
-Restart=on-failure
-RestartSec=5
-RemainAfterExit=true
-
-[Install]
-WantedBy=multi-user.target
-```
+In our KTHW approach, we skip MCS. Each node gets a complete ignition file directly via `coreos-installer`. No fetching, no intermediary. You see exactly what each node gets. The tradeoff: a separate ignition per node (which we already have — `master-0.ign`, `master-1.ign`, etc.).
 
 ## File Permissions
 
@@ -246,42 +240,6 @@ After ignition runs, bootstrap has:
 └── tls/
     └── (additional certs)
 ```
-
-## Using Butane
-
-Butane is a human-friendly way to write Ignition configs:
-
-```yaml
-# bootstrap.bu
-variant: fcos
-version: 1.4.0
-passwd:
-  users:
-    - name: core
-      ssh_authorized_keys:
-        - ssh-rsa AAAA...
-storage:
-  files:
-    - path: /etc/kubernetes/kubeconfig
-      mode: 0600
-      contents:
-        local: kubeconfig
-systemd:
-  units:
-    - name: kubelet.service
-      enabled: true
-      contents: |
-        [Unit]
-        Description=Kubernetes Kubelet
-        ...
-```
-
-Convert to Ignition:
-```bash
-butane bootstrap.bu -o bootstrap.ign
-```
-
-We use raw Ignition JSON for transparency, but Butane is available.
 
 ## Verification
 

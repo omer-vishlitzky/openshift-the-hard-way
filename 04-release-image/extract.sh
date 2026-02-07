@@ -46,12 +46,15 @@ export RELEASE_DIGEST="${RELEASE_DIGEST}"
 
 # Control Plane Components
 export ETCD_IMAGE="$(get_image etcd)"
-export KUBE_APISERVER_IMAGE="$(get_image kube-apiserver)"
-export KUBE_CONTROLLER_MANAGER_IMAGE="$(get_image kube-controller-manager)"
-export KUBE_SCHEDULER_IMAGE="$(get_image kube-scheduler)"
 export HYPERKUBE_IMAGE="$(get_image hyperkube)"
+# In OpenShift, apiserver/kcm/scheduler all come from the hyperkube image.
+# There are no separate kube-apiserver, kube-controller-manager, or kube-scheduler
+# image tags in the release — hyperkube contains all three binaries.
+export KUBE_APISERVER_IMAGE="${HYPERKUBE_IMAGE}"
+export KUBE_CONTROLLER_MANAGER_IMAGE="${HYPERKUBE_IMAGE}"
+export KUBE_SCHEDULER_IMAGE="${HYPERKUBE_IMAGE}"
 
-# Operator Images (for rendering)
+# Operator Images (manage components day 2, referenced in cluster manifests)
 export CLUSTER_ETCD_OPERATOR_IMAGE="$(get_image cluster-etcd-operator)"
 export CLUSTER_KUBE_APISERVER_OPERATOR_IMAGE="$(get_image cluster-kube-apiserver-operator)"
 export CLUSTER_KUBE_CONTROLLER_MANAGER_OPERATOR_IMAGE="$(get_image cluster-kube-controller-manager-operator)"

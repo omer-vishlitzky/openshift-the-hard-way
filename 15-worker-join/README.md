@@ -20,13 +20,12 @@ virsh start ${CLUSTER_NAME}-worker-0
 virsh start ${CLUSTER_NAME}-worker-1
 ```
 
-## Step 2: Workers Fetch Ignition
+## Step 2: Workers Boot
 
-Workers boot and:
-1. Fetch ignition from MCS (`https://api-int:22623/config/worker`)
-2. Apply worker-specific configuration
-3. Start kubelet
-4. Kubelet tries to register with API server
+Workers boot with their complete ignition and:
+1. Start kubelet
+2. Kubelet uses bootstrap kubeconfig to register with API server
+3. Kubelet creates a CSR — you approve it manually
 
 ## Step 3: Approve CSRs
 

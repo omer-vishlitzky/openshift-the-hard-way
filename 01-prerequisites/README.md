@@ -5,6 +5,17 @@ Before starting, you need:
 2. Access to Red Hat resources
 3. Understanding of what we're building
 
+## Why This Stage Exists
+
+Unlike `kubeadm` which works with minimal setup, OpenShift installation requires specific tools and resources:
+
+- **podman**: Used to extract component images from the release payload.
+- **Pull secret**: OpenShift images are hosted in authenticated registries. Without a valid pull secret, you can't pull any images.
+- **OpenSSL**: We generate many certificates manually. Understanding PKI is essential for debugging certificate errors.
+- **libvirt**: VMs are the simplest way to simulate bare metal. Real installations work identically.
+
+Skipping prerequisites leads to cryptic failures later. Spending time here saves debugging time later.
+
 ## Tools Required
 
 ### Container Runtime
@@ -18,9 +29,7 @@ podman --version
 ```
 
 We use podman to:
-- Extract the release image
-- Run operator render containers
-- Build Ignition files
+- Extract component image references from the release image
 
 ### OpenShift CLI
 
@@ -33,31 +42,14 @@ curl -L https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshi
 oc version --client
 ```
 
-### OpenShift Installer (for reference)
-
-We won't use `openshift-install` to install the cluster, but we'll use it to:
-- Examine what it produces
-- Extract manifests for comparison
-
-```bash
-curl -L https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-install-linux.tar.gz | \
-  sudo tar -xz -C /usr/local/bin openshift-install
-
-# Verify
-openshift-install version
-```
-
 ### libvirt/KVM
 
 ```bash
 # Install libvirt and dependencies
 sudo dnf install -y \
   libvirt \
-  libvirt-devel \
   qemu-kvm \
-  virt-install \
-  virt-manager \
-  bridge-utils
+  virt-install
 
 # Start and enable libvirtd
 sudo systemctl enable --now libvirtd
@@ -77,14 +69,6 @@ sudo dnf install -y haproxy
 # We'll configure it in stage 02
 ```
 
-### dnsmasq (for DNS)
-
-```bash
-sudo dnf install -y dnsmasq
-
-# We'll configure it in stage 02
-```
-
 ### OpenSSL
 
 ```bash
@@ -94,22 +78,10 @@ openssl version
 # We need 1.1.1+ for some certificate operations
 ```
 
-### jq (JSON processing)
+### jq, bind-utils
 
 ```bash
-sudo dnf install -y jq
-```
-
-### Other utilities
-
-```bash
-sudo dnf install -y \
-  nmstate \
-  coreos-installer \
-  butane \
-  wget \
-  curl \
-  git
+sudo dnf install -y jq bind-utils
 ```
 
 ## Red Hat Account
@@ -155,7 +127,7 @@ cat ~/.ssh/id_rsa.pub
 |----------|---------|-------------|
 | CPU | 8 cores | 16+ cores |
 | RAM | 32 GB | 64+ GB |
-| Disk | 200 GB | 500+ GB SSD |
+| Disk | 100 GB | |
 
 The host runs:
 - 1 Bootstrap VM (16 GB RAM, 4 vCPU)

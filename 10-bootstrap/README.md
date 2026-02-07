@@ -2,6 +2,32 @@
 
 The bootstrap node orchestrates cluster initialization. This stage explains what happens during bootstrap and how to monitor it.
 
+## Why This Stage Exists
+
+Bootstrap solves the chicken-and-egg problem of cluster initialization:
+
+**The problem:**
+- To join a Kubernetes cluster, a node needs credentials from the API server
+- To have an API server, you need etcd
+- To have etcd, you need a node running it
+- But that node needs to get its config from... the API server
+
+**The solution:**
+A temporary bootstrap node that has everything embedded in its ignition:
+1. All certificates (no need to fetch from API)
+2. All manifests (can start without existing cluster)
+3. Machine Config Server (serves config to other nodes)
+
+The bootstrap node is the "seed" from which the cluster grows. Once masters take over, the seed (bootstrap) is no longer needed.
+
+**Why not just have the first master do this?**
+
+Separation of concerns:
+- Bootstrap is temporary, disposable
+- Masters are permanent, need to be pristine
+- If bootstrap fails, delete and recreate - no impact on production
+- Masters never have bootstrap-specific config that might cause issues
+
 ## Bootstrap Overview
 
 The bootstrap process:
@@ -12,17 +38,13 @@ The bootstrap process:
 ├─────────────────────────────────────────────────────────────────────┤
 │  1. RHCOS boots with bootstrap.ign                                  │
 │  2. kubelet starts                                                  │
-│  3. bootkube.sh runs                                                │
-│     a. Renders manifests using operators                           │
-│     b. Writes static pod manifests                                 │
-│     c. kubelet starts static pods                                  │
+│  3. kubelet starts static pods (pre-baked in ignition)              │
 │  4. etcd starts (single member)                                     │
 │  5. kube-apiserver starts                                           │
 │  6. kube-controller-manager starts                                  │
 │  7. kube-scheduler starts                                           │
-│  8. Machine Config Server starts                                    │
-│  9. Cluster manifests applied                                       │
-│ 10. Waits for masters to join                                       │
+│  8. bootkube.sh waits for healthy, applies cluster manifests        │
+│  9. Waits for masters to join                                       │
 │ 11. etcd scales to 3 members                                        │
 │ 12. Control plane pivots to masters                                 │
 │ 13. Bootstrap complete                                              │
@@ -133,9 +155,9 @@ RHCOS boots and applies ignition:
 The bootkube service runs `/opt/openshift/bootkube.sh`.
 
 Key operations:
-1. Sources environment variables (image references)
-2. Runs operator render commands
-3. Writes rendered manifests to `/etc/kubernetes/manifests/`
+1. Waits for etcd and API server to become healthy
+2. Applies cluster manifests (namespaces, RBAC, CRDs)
+3. Waits for masters to join
 
 ### Stage 4: etcd starts
 
@@ -159,27 +181,16 @@ After etcd is healthy, kube-apiserver starts.
 
 Then kube-controller-manager and kube-scheduler start and connect to the API server.
 
-### Stage 8: Machine Config Server
-
-The MCS starts serving ignition configs:
-
-```bash
-# From bootstrap
-curl -k https://localhost:22623/config/master
-```
-
-This is what masters fetch when they boot.
-
-### Stage 9: Cluster manifests
+### Stage 8: Cluster manifests
 
 bootkube.sh applies manifests to seed the cluster:
+- Core namespaces and RBAC
 - CVO deployment
-- MCO deployment
-- Core cluster resources
+- Cluster configuration
 
-### Stage 10-12: Masters join
+### Stage 9: Masters join
 
-This happens after you boot the masters (Stage 11).
+This happens after you boot the masters (Stage 11). Each master has its own complete ignition config (no MCS needed).
 
 ## Verification Checklist
 
@@ -196,8 +207,8 @@ sudo crictl exec -it $(sudo crictl ps -q --name etcd) \
 # API responding
 curl -k https://localhost:6443/healthz
 
-# MCS serving
-curl -k https://localhost:22623/healthz
+# Cluster manifests applied
+oc --kubeconfig=/etc/kubernetes/kubeconfigs/localhost.kubeconfig get ns
 ```
 
 ## Failure Signals
